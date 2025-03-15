@@ -31,6 +31,17 @@ export async function user(userId: number) {
     res.json({ result: lastSentMessage });
   });
 
+  _user.post("/message", (req: Request, res: Response) => {
+    const { message } = req.body as SendMessageBody;
+
+    if (!message || typeof message !== "string") {
+        return res.status(400).json({ error: "Invalid message" });
+    }
+
+    lastReceivedMessage = message;
+    return res.send("success"); // ✅ Explicitly returning ensures all paths return a value
+  });
+
   const server = _user.listen(BASE_USER_PORT + userId, () => {
     console.log(`User ${userId} is listening on port ${BASE_USER_PORT + userId}`);
   });
