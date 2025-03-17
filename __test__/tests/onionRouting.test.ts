@@ -474,7 +474,46 @@ describe("Onion Routing", () => {
       expect(decrypted).toBe(b64Message);
     });
 
-    test.todo("Hidden test - Can rsa encrypt and decrypt - 1pt");
+    // test.todo("Hidden test - Can rsa encrypt and decrypt - 1pt");
+
+    it("Hidden test - Can RSA encrypt and decrypt - 1pt", async () => {
+      const { publicKey, privateKey } = await generateRsaKeyPair();
+    
+      // Normal message
+      const message = "Hidden test message";
+      const b64Message = btoa(message);
+    
+      const encrypted = await rsaEncrypt(b64Message, await exportPubKey(publicKey));
+      const decrypted = await rsaDecrypt(encrypted, privateKey);
+    
+      expect(decrypted).toBe(b64Message);
+    
+      // Edge Case 1: Empty string
+      const emptyEncrypted = await rsaEncrypt(btoa(""), await exportPubKey(publicKey));
+      const emptyDecrypted = await rsaDecrypt(emptyEncrypted, privateKey);
+    
+      expect(emptyDecrypted).toBe(btoa(""));
+    
+      // Edge Case 2: Long message
+      const longMessage = "A".repeat(100);
+      const b64LongMessage = btoa(longMessage);
+    
+      const longEncrypted = await rsaEncrypt(b64LongMessage, await exportPubKey(publicKey));
+      const longDecrypted = await rsaDecrypt(longEncrypted, privateKey);
+    
+      expect(longDecrypted).toBe(b64LongMessage);
+    
+      // Edge Case 3: Random binary data 
+      const randomBytes = new Uint8Array(128); 
+      crypto.getRandomValues(randomBytes);
+      const b64Binary = btoa(String.fromCharCode(...randomBytes));
+    
+      const binaryEncrypted = await rsaEncrypt(b64Binary, await exportPubKey(publicKey));
+      const binaryDecrypted = await rsaDecrypt(binaryEncrypted, privateKey);
+    
+      expect(binaryDecrypted).toBe(b64Binary);
+    });
+    
 
     it("Can generate symmetric key - 0.5 pt", async () => {
       const symKey = await createRandomSymmetricKey();
@@ -514,7 +553,46 @@ describe("Onion Routing", () => {
       expect(decrypted).toBe(b64Message);
     });
 
-    test.todo("Hidden test - Can symmetrically encrypt and decrypt - 1pt");
+    // test.todo("Hidden test - Can symmetrically encrypt and decrypt - 1pt");
+    it("Hidden test - Can symmetrically encrypt and decrypt - 1pt", async () => {
+      const symKey = await createRandomSymmetricKey();
+    
+      // Normal message
+      const message = "Hidden symmetric test message";
+      const b64Message = btoa(message);
+    
+      const encrypted = await symEncrypt(symKey, b64Message);
+      const decrypted = await symDecrypt(await exportSymKey(symKey), encrypted);
+    
+      expect(decrypted).toBe(b64Message);
+    
+      // Edge Case 1: Empty string 
+      const emptyEncrypted = await symEncrypt(symKey, btoa(""));
+      const emptyDecrypted = await symDecrypt(await exportSymKey(symKey), emptyEncrypted);
+    
+      expect(emptyDecrypted).toBe(btoa(""));
+    
+      // Edge Case 2: Long message 
+      const longMessage = "A".repeat(5000);
+      const b64LongMessage = btoa(longMessage);
+    
+      const longEncrypted = await symEncrypt(symKey, b64LongMessage);
+      const longDecrypted = await symDecrypt(await exportSymKey(symKey), longEncrypted);
+    
+      expect(longDecrypted).toBe(b64LongMessage);
+    
+      // Edge Case 3: Binary data
+      const binaryMessage = new Uint8Array(256); 
+      crypto.getRandomValues(binaryMessage);
+      const b64BinaryMessage = btoa(String.fromCharCode(...binaryMessage));
+    
+      const binaryEncrypted = await symEncrypt(symKey, b64BinaryMessage);
+      const binaryDecrypted = await symDecrypt(await exportSymKey(symKey), binaryEncrypted);
+    
+      expect(binaryDecrypted).toBe(b64BinaryMessage);
+    });
+    
+
   });
 
   describe("Can forward messages through the network - 10 pt", () => {
@@ -683,7 +761,51 @@ describe("Onion Routing", () => {
       }
     });
 
-    test.todo("Hidden test - the right message is passed to each node - 2pt");
+    // test.todo("Hidden test - the right message is passed to each node - 2pt");
+
+    it("Hidden test - the right message is passed to each node - 2pt", async () => {
+      let testMessages = [
+        "Testing the whole decentralised network...", // Normal case
+        "", // Edge case: Empty message
+        "A".repeat(5000), // Edge case: Very long message
+        "Message with special characters !@#$%^&*()_+-=[]{}|;:'\",.<>?/~`", // Edge case: Special characters
+      ];
+      
+      for (let message of testMessages) {
+        await sendMessage(
+          BASE_USER_PORT + 0,
+          message,
+          1
+        );
+
+        const circuit = await getLastCircuit(BASE_USER_PORT + 0);
+
+        for (let index = 0; index < circuit.length - 1; index++) {
+          const lastReceivedEncryptedMessage =
+            await getLastReceivedEncryptedMessage(
+              BASE_ONION_ROUTER_PORT + circuit[index]
+            );
+
+          const lastReceivedDecryptedMessage =
+            await getLastReceivedDecryptedMessage(
+              BASE_ONION_ROUTER_PORT + circuit[index]
+            );
+
+          const privateKey = await getPrivateKey(
+            BASE_ONION_ROUTER_PORT + circuit[index]
+          );
+
+          const isValid = await validateEncryption(
+            lastReceivedEncryptedMessage,
+            lastReceivedDecryptedMessage,
+            privateKey
+          );
+
+          expect(isValid).toBeTruthy();
+        }
+      }
+    });
+    
   });
 
   describe("Hidden tests - 2 pt", () => {
@@ -698,8 +820,84 @@ describe("Onion Routing", () => {
       await closeAllServers(servers);
     });
 
-    test.todo("Hidden test - Can send an empty message - 1pt");
+    // test.todo("Hidden test - Can send an empty message - 1pt");
+    it("Hidden test - Can send an empty message - 1pt", async () => {
+        await sendMessage(
+          BASE_USER_PORT + 0,
+          "",
+          1
+        );
+  
+        const circuit = await getLastCircuit(BASE_USER_PORT + 0);
+  
+        for (let index = 0; index < circuit.length - 1; index++) {
+          const lastReceivedEncryptedMessage =
+            await getLastReceivedEncryptedMessage(
+              BASE_ONION_ROUTER_PORT + circuit[index]
+            );
+  
+          const lastReceivedDecryptedMessage =
+            await getLastReceivedDecryptedMessage(
+              BASE_ONION_ROUTER_PORT + circuit[index]
+            );
+  
+          const privateKey = await getPrivateKey(
+            BASE_ONION_ROUTER_PORT + circuit[index]
+          );
+  
+          const isValid = await validateEncryption(
+            lastReceivedEncryptedMessage,
+            lastReceivedDecryptedMessage,
+            privateKey
+          );
+  
+          expect(isValid).toBeTruthy();
+        }
+    });
+    
+    
+    // test.todo("Hidden test - Edge case #2 - 1pt");
+    it("Hidden test - Edge case #2 - 1pt", async () => {
+      const edgeCases = [
+        " ".repeat(100),
+        "A".repeat(10000),
+        "12345"
+      ];
+    
+      for (const testCase of edgeCases) {
+        await sendMessage(
+          BASE_USER_PORT + 0,
+          testCase,
+          1
+        );
+  
+        const circuit = await getLastCircuit(BASE_USER_PORT + 0);
+  
+        for (let index = 0; index < circuit.length - 1; index++) {
+          const lastReceivedEncryptedMessage =
+            await getLastReceivedEncryptedMessage(
+              BASE_ONION_ROUTER_PORT + circuit[index]
+            );
+  
+          const lastReceivedDecryptedMessage =
+            await getLastReceivedDecryptedMessage(
+              BASE_ONION_ROUTER_PORT + circuit[index]
+            );
+  
+          const privateKey = await getPrivateKey(
+            BASE_ONION_ROUTER_PORT + circuit[index]
+          );
+  
+          const isValid = await validateEncryption(
+            lastReceivedEncryptedMessage,
+            lastReceivedDecryptedMessage,
+            privateKey
+          );
+  
+          expect(isValid).toBeTruthy();
+        }
+      }
+    });
 
-    test.todo("Hidden test - Edge case #2 - 1pt");
   });
 });

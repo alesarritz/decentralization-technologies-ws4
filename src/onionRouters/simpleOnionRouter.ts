@@ -86,7 +86,7 @@ export async function simpleOnionRouter(nodeId: number) {
       }
 
       const destination = parseInt(decryptedPayload.slice(0, 10), 10);
-      const remainingMessage = decryptedPayload.slice(10);
+      const remainingMessage = decryptedPayload.length > 10 ? decryptedPayload.substring(10) : "";
 
       lastReceivedDecryptedMessage = remainingMessage;
       lastMessageDestination = destination;

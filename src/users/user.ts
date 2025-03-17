@@ -24,7 +24,7 @@ export async function user(userId: number) {
     const { message, circuit } = req.body;
     if (!message) return res.status(400).json({ error: "Message required." });
 
-    lastReceivedMessage = message;
+    lastReceivedMessage = message === undefined ? "" : message;
     if (circuit) lastCircuit = circuit;
 
     return res.send("success");
