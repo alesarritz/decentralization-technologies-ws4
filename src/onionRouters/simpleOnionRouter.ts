@@ -1,7 +1,15 @@
 import bodyParser from "body-parser";
-import express, { Request, Response } from "express";
-import { BASE_ONION_ROUTER_PORT, REGISTRY_PORT } from "../config";
-import { generateRsaKeyPair, exportPubKey, exportPrvKey } from "../crypto";
+import express from "express";
+import { BASE_ONION_ROUTER_PORT, REGISTRY_PORT, BASE_USER_PORT } from "../config";
+import {
+  generateRsaKeyPair,
+  rsaDecrypt,
+  symDecrypt,
+  importSymKey,
+  exportPubKey,
+  exportPrvKey,
+  exportSymKey,
+} from "../crypto";
 import { webcrypto } from "node:crypto";
 
 type CK = webcrypto.CryptoKey;
@@ -15,8 +23,7 @@ export async function simpleOnionRouter(nodeId: number) {
   let publicKey: CK;
   let privateKeyStr: string;
   let publicKeyStr: string;
-
-  // Store the last received messages and destination (default: null)
+  let lastCircuit: number[] = [];
   let lastReceivedEncryptedMessage: string | null = null;
   let lastReceivedDecryptedMessage: string | null = null;
   let lastMessageDestination: number | null = null;
@@ -25,56 +32,80 @@ export async function simpleOnionRouter(nodeId: number) {
     const keyPair = await generateRsaKeyPair();
     privateKey = keyPair.privateKey;
     publicKey = keyPair.publicKey;
-
-    // Convert keys to base64
     publicKeyStr = await exportPubKey(publicKey);
     privateKeyStr = await exportPrvKey(privateKey);
 
-    // Register with the registry
-    const response = await fetch(`http://localhost:${REGISTRY_PORT}/registerNode`, {
+    const registryResponse = await fetch(`http://localhost:${REGISTRY_PORT}/registerNode`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nodeId, pubKey: publicKeyStr }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to register node ${nodeId}`);
-    }
-
+    if (!registryResponse.ok) throw new Error(`Failed to register node: ${registryResponse.statusText}`);
     console.log(`Node ${nodeId} registered successfully`);
   } catch (error) {
     console.error("Failed to initialize node:", error);
     throw error;
   }
 
-  // Status route
-  onionRouter.get("/status", (req: Request, res: Response) => {
-    res.send("live");
+  onionRouter.get("/status", (req, res) => res.send("live"));
+  onionRouter.get("/getLastReceivedEncryptedMessage", (req, res) => res.json({ result: lastReceivedEncryptedMessage }));
+  onionRouter.get("/getLastReceivedDecryptedMessage", (req, res) => res.json({ result: lastReceivedDecryptedMessage }));
+  onionRouter.get("/getLastMessageDestination", (req, res) => res.json({ result: lastMessageDestination }));
+  onionRouter.get("/getPrivateKey", async (req, res) => res.json({ result: privateKeyStr }));
+  onionRouter.get("/getLastCircuit", (req, res) => res.json({ result: lastCircuit }));
+
+  onionRouter.post("/message", async (req, res) => {
+    try {
+      const { message, circuit = [] } = req.body;
+      console.log(`Node ${nodeId} received message:`, message);
+  
+      if (!message) return res.status(400).json({ error: "Message required" });
+  
+      lastReceivedEncryptedMessage = message;
+      console.log(`Last received encrypted message on Node ${nodeId}:`, lastReceivedEncryptedMessage);
+
+      const encryptedSymKey = message.slice(0, 344);
+      const encryptedPayload = message.slice(344);
+
+      let symKey;
+      try {
+        const symKeyStr = await rsaDecrypt(encryptedSymKey, privateKey);
+        symKey = await importSymKey(symKeyStr);
+      } catch (error) {
+        console.error(`Node ${nodeId} failed to decrypt symmetric key:`, error);
+        return res.status(500).json({ error: "Symmetric key decryption failed" });
+      }
+
+      let decryptedPayload;
+      try {
+        decryptedPayload = await symDecrypt(await exportSymKey(symKey), encryptedPayload);
+      } catch (error) {
+        console.error(`Node ${nodeId} failed to decrypt payload:`, error);
+        return res.status(500).json({ error: "Payload decryption failed" });
+      }
+
+      const destination = parseInt(decryptedPayload.slice(0, 10), 10);
+      const remainingMessage = decryptedPayload.slice(10);
+
+      lastReceivedDecryptedMessage = remainingMessage;
+      lastMessageDestination = destination;
+      lastCircuit = [...circuit, nodeId];
+
+      await fetch(`http://localhost:${destination}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: remainingMessage, circuit: lastCircuit }),
+      });
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("Error processing message:", error);
+      return res.status(500).json({ error: "Failed to process message" });
+    }
   });
 
-  // GET last received encrypted message
-  onionRouter.get("/getLastReceivedEncryptedMessage", (req: Request, res: Response) => {
-    res.json({ result: lastReceivedEncryptedMessage });
-  });
-
-  // GET last received decrypted message
-  onionRouter.get("/getLastReceivedDecryptedMessage", (req: Request, res: Response) => {
-    res.json({ result: lastReceivedDecryptedMessage });
-  });
-
-  // GET last message destination
-  onionRouter.get("/getLastMessageDestination", (req: Request, res: Response) => {
-    res.json({ result: lastMessageDestination });
-  });
-
-  // Provide private key for testing purposes
-  onionRouter.get("/getPrivateKey", (req: Request, res: Response) => {
-    res.json({ result: privateKeyStr });
-  });
-
-  const server = onionRouter.listen(BASE_ONION_ROUTER_PORT + nodeId, () => {
-    console.log(`Onion router ${nodeId} is listening on port ${BASE_ONION_ROUTER_PORT + nodeId}`);
-  });
-
-  return server;
+  return onionRouter.listen(BASE_ONION_ROUTER_PORT + nodeId, () =>
+    console.log(`Onion router ${nodeId} is listening on port ${BASE_ONION_ROUTER_PORT + nodeId}`)
+  );
 }

@@ -1,4 +1,5 @@
 import { webcrypto } from "crypto";
+type CK = webcrypto.CryptoKey;
 
 // #############
 // ### Utils ###
@@ -104,8 +105,11 @@ export async function rsaEncrypt(
     encodedData
   );
 
-  return arrayBufferToBase64(encryptedData);
+  const result = arrayBufferToBase64(encryptedData);
+  console.log("Encrypted Data:", result); // Debugging output
+  return result;
 }
+
 
 
 // Decrypts a message using an RSA private key
@@ -162,37 +166,65 @@ export async function importSymKey(strKey: string): Promise<webcrypto.CryptoKey>
 
 // Encrypt a message using a symmetric key
 export async function symEncrypt(
-  key: webcrypto.CryptoKey,
+  key: string | CK,
   data: string
 ): Promise<string> {
-  const iv = webcrypto.getRandomValues(new Uint8Array(16)); // Generate a random IV
-  const encodedData = new TextEncoder().encode(data);
+  let cryptoKey: CK;
+  if (typeof key === 'string') {
+    cryptoKey = await importSymKey(key);
+  } else {
+    cryptoKey = key;
+  }
 
-  const encryptedData = await webcrypto.subtle.encrypt(
-    { name: "AES-CBC", iv },
-    key,
-    encodedData
+  const iv = webcrypto.getRandomValues(new Uint8Array(16));
+  const encoded = new TextEncoder().encode(data);
+
+  const encrypted = await webcrypto.subtle.encrypt(
+    {
+      name: "AES-CBC",
+      iv
+    },
+    cryptoKey,
+    encoded
   );
 
-  return arrayBufferToBase64(iv) + "." + arrayBufferToBase64(encryptedData);
+  const combined = new Uint8Array(iv.length + encrypted.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(encrypted), iv.length);
+
+  return Buffer.from(combined).toString('base64');
 }
+
 
 
 // Decrypt a message using a symmetric key
 export async function symDecrypt(
-  strKey: string,
+  key: string | CK,
   encryptedData: string
 ): Promise<string> {
-  const key = await importSymKey(strKey);
-  const [ivStr, encryptedStr] = encryptedData.split(".");
-  const iv = base64ToArrayBuffer(ivStr);
-  const encryptedBuffer = base64ToArrayBuffer(encryptedStr);
+  let cryptoKey: CK;
+  if (typeof key === 'string') {
+    cryptoKey = await importSymKey(key);
+  } else {
+    cryptoKey = key;
+  }
 
-  const decryptedData = await webcrypto.subtle.decrypt(
-    { name: "AES-CBC", iv },
-    key,
-    encryptedBuffer
+  // Decode the concatenated IV + encrypted data
+  const combined = Buffer.from(encryptedData, 'base64');
+
+  // Extract IV and encrypted data correctly
+  const iv = combined.slice(0, 16);
+  const data = combined.slice(16);
+
+  const decrypted = await webcrypto.subtle.decrypt(
+    {
+      name: "AES-CBC",
+      iv
+    },
+    cryptoKey,
+    data
   );
 
-  return new TextDecoder().decode(decryptedData);
+  return new TextDecoder().decode(decrypted);
 }
+
